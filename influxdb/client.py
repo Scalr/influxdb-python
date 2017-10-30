@@ -12,6 +12,7 @@ import json
 import socket
 import requests
 import requests.exceptions
+import requests.adapters
 
 from influxdb.line_protocol import make_lines, quote_ident, quote_literal
 from influxdb.resultset import ResultSet
@@ -27,6 +28,8 @@ if version_info[0] == 3:
     from urllib.parse import urlparse
 else:
     from urlparse import urlparse
+
+DEFAULT_POOL_SIZE = 10
 
 
 class InfluxDBClient(object):
@@ -71,6 +74,7 @@ class InfluxDBClient(object):
                  port=8086,
                  username='root',
                  password='root',
+                 pool_size=DEFAULT_POOL_SIZE,
                  database=None,
                  ssl=False,
                  verify_ssl=False,
@@ -94,6 +98,9 @@ class InfluxDBClient(object):
         self.__use_udp = use_udp
         self.__udp_port = udp_port
         self._session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(pool_connections=pool_size, pool_maxsize=pool_size)
+        self._session.mount('http://', adapter)
+        self._session.mount('https://', adapter)
         if use_udp:
             self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
