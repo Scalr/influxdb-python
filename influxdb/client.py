@@ -7,11 +7,14 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from sys import version_info
+import time
+import random
 
 import json
 import socket
 import requests
 import requests.exceptions
+import requests.adapters
 
 from influxdb.line_protocol import make_lines, quote_ident, quote_literal
 from influxdb.resultset import ResultSet
@@ -44,6 +47,8 @@ class InfluxDBClient(object):
     :type username: str
     :param password: password of the user, defaults to 'root'
     :type password: str
+    :param pool_size: urllib3 connection pool size, defaults to 10. 
+    :type pool_size: int 
     :param database: database name to connect to, defaults to None
     :type database: str
     :param ssl: use https instead of http to connect to InfluxDB, defaults to
@@ -71,6 +76,7 @@ class InfluxDBClient(object):
                  port=8086,
                  username='root',
                  password='root',
+                 pool_size=10,
                  database=None,
                  ssl=False,
                  verify_ssl=False,
@@ -94,13 +100,16 @@ class InfluxDBClient(object):
         self.__use_udp = use_udp
         self.__udp_port = udp_port
         self._session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(pool_connections=pool_size, pool_maxsize=pool_size)
+
         if use_udp:
             self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
         self._scheme = "http"
-
         if ssl is True:
             self._scheme = "https"
+
+        self._session.mount(self._scheme, adapter)
 
         if proxies is None:
             self._proxies = {}
@@ -235,9 +244,9 @@ class InfluxDBClient(object):
         # Try to send the request more than once by default (see #103)
         retry = True
         _try = 0
-        _last_exc = None
         while retry:
             try:
+                _error = False
                 response = self._session.request(
                     method=method,
                     url=url,
@@ -250,23 +259,27 @@ class InfluxDBClient(object):
                     timeout=self._timeout
                 )
                 break
-            except requests.exceptions.ConnectionError as e:
-                _last_exc = e
+            except (requests.exceptions.ConnectionError,
+                    requests.exceptions.HTTPError,
+                    requests.exceptions.Timeout) as _e:
+                _error = _e
                 _try += 1
                 if self._retries != 0:
                     retry = _try < self._retries
-
+                if method == "POST":
+                    time.sleep((2 ** _try) * random.random() / 100.0)
+        if _error:
+            raise(_error)
         else:
-            if _last_exc:
-                raise _last_exc
-            raise requests.exceptions.ConnectionError
-
-        if 500 <= response.status_code < 600:
-            raise InfluxDBServerError(response.content)
-        elif response.status_code == expected_response_code:
-            return response
-        else:
-            raise InfluxDBClientError(response.content, response.status_code)
+            # if there's not an error, there must have been a successful
+            # response
+            if 500 <= response.status_code < 600:
+                raise InfluxDBServerError(response.content)
+            elif response.status_code == expected_response_code:
+                return response
+            else:
+                raise InfluxDBClientError(response.content,
+                                          response.status_code)
 
     def write(self, data, params=None, expected_response_code=204,
               protocol='json'):
