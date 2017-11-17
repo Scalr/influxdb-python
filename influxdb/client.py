@@ -15,6 +15,7 @@ import requests
 import requests.exceptions
 from six.moves import xrange
 from six.moves.urllib.parse import urlparse
+import requests.adapters
 
 from influxdb.line_protocol import make_lines, quote_ident, quote_literal
 from influxdb.resultset import ResultSet
@@ -99,7 +100,6 @@ class InfluxDBClient(object):
             self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
         self._scheme = "http"
-
         if ssl is True:
             self._scheme = "https"
 
